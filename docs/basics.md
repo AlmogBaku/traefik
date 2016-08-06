@@ -30,7 +30,7 @@ Entrypoints are the network entry points into Træfɪk.
 They can be defined using:
 
 - a port (80, 443...)
-- SSL (Certificates. Keys...)
+- SSL (Certificates, Keys, authentication with a client certificate signed by a trusted CA...)
 - redirection to another entrypoint (redirect `HTTP` to `HTTPS`)
 
 Here is an example of entrypoints definition:
@@ -50,9 +50,26 @@ Here is an example of entrypoints definition:
 ```
 
 - Two entrypoints are defined `http` and `https`.
-- `http` listens on port `80` et `https` on port `443`.
-- We enable SSL en `https` by giving a certificate and a key.
+- `http` listens on port `80` and `https` on port `443`.
+- We enable SSL on `https` by giving a certificate and a key.
 - We also redirect all the traffic from entrypoint `http` to `https`.
+
+And here is another example with client certificate authentication:
+
+```toml
+[entryPoints]
+  [entryPoints.https]
+  address = ":443"
+  [entryPoints.https.tls]
+  clientCAFiles = ["tests/clientca1.crt", "tests/clientca2.crt"]
+    [[entryPoints.https.tls.certificates]]
+    certFile = "tests/traefik.crt"
+    keyFile = "tests/traefik.key"
+```
+
+- We enable SSL on `https` by giving a certificate and a key.
+- One or several files containing Certificate Authorities in PEM format are added.
+- It is possible to have multiple CA:s in the same file or keep them in separate files.
 
 ## Frontends
 
@@ -80,25 +97,64 @@ Here is an example of frontends definition:
   [frontends.frontend1]
   backend = "backend2"
     [frontends.frontend1.routes.test_1]
-    rule = "Host: test.localhost, test2.localhost"
+    rule = "Host:test.localhost,test2.localhost"
   [frontends.frontend2]
   backend = "backend1"
   passHostHeader = true
   priority = 10
   entrypoints = ["https"] # overrides defaultEntryPoints
     [frontends.frontend2.routes.test_1]
-    rule = "Host: localhost, {subdomain:[a-z]+}.localhost"
+    rule = "Host:localhost,{subdomain:[a-z]+}.localhost"
   [frontends.frontend3]
   backend = "backend2"
-    rule = "Host: test3.localhost;Path:/test"
+    [frontends.frontend3.routes.test_1]
+    rule = "Host:test3.localhost;Path:/test"
 ```
 
 - Three frontends are defined: `frontend1`, `frontend2` and `frontend3`
-- `frontend1` will forward the traffic to the `backend2` if the rule `Host: test.localhost, test2.localhost` is matched
-- `frontend2` will forward the traffic to the `backend1` if the rule `Host: localhost, {subdomain:[a-z]+}.localhost` is matched (forwarding client `Host` header to the backend)
-- `frontend3` will forward the traffic to the `backend2` if the rules `Host: test3.localhost` and `Path:/test` are matched
+- `frontend1` will forward the traffic to the `backend2` if the rule `Host:test.localhost,test2.localhost` is matched
+- `frontend2` will forward the traffic to the `backend1` if the rule `Host:localhost,{subdomain:[a-z]+}.localhost` is matched (forwarding client `Host` header to the backend)
+- `frontend3` will forward the traffic to the `backend2` if the rules `Host:test3.localhost` **AND** `Path:/test` are matched
 
-By default, routes will be sorted using rules length (to avoid path overlap):
+### Combining multiple rules
+
+As seen in the previous example, you can combine multiple rules.
+In TOML file, you can use multiple routes:
+
+```toml
+  [frontends.frontend3]
+  backend = "backend2"
+    [frontends.frontend3.routes.test_1]
+    rule = "Host:test3.localhost"
+    [frontends.frontend3.routes.test_2]
+    rule = "Path:/test"
+```
+
+Here `frontend3` will forward the traffic to the `backend2` if the rules `Host:test3.localhost` **AND** `Path:/test` are matched.
+You can also use the notation using a `;` separator, same result:
+
+```toml
+  [frontends.frontend3]
+  backend = "backend2"
+    [frontends.frontend3.routes.test_1]
+    rule = "Host:test3.localhost;Path:/test"
+```
+
+Finally, you can create a rule to bind multiple domains or Path to a frontend, using the `,` separator:
+
+```toml
+ [frontends.frontend2]
+    [frontends.frontend2.routes.test_1]
+    rule = "Host:test1.localhost,test2.localhost"
+  [frontends.frontend3]
+  backend = "backend2"
+    [frontends.frontend3.routes.test_1]
+    rule = "Path:/test1,/test2"
+```
+
+### Priorities
+
+By default, routes will be sorted (in descending order) using rules length (to avoid path overlap):
 `PathPrefix:/12345` will be matched before `PathPrefix:/1234` that will be matched before `PathPrefix:/1`.
 
 You can customize priority by frontend:
@@ -118,6 +174,8 @@ You can customize priority by frontend:
       [frontends.frontend2.routes.test_1]
       rule = "PathPrefix:/toto"
 ```
+
+Here, `frontend1` will be matched before `frontend2` (`10 > 5`).
 
 ## Backends
 
@@ -197,9 +255,30 @@ Here is an example of backends and servers definition:
 - `backend2` will forward the traffic to two servers: `http://172.17.0.4:80"` with weight `1` and `http://172.17.0.5:80` with weight `2` using `drr` load-balancing strategy.
 - a circuit breaker is added on `backend1` using the expression `NetworkErrorRatio() > 0.5`: watch error ratio over 10 second sliding window
 
-# Launch
+# Configuration
 
-Træfɪk can be configured using a TOML file configuration, arguments, or both.
+Træfɪk's configuration has two parts: 
+
+- The [static Træfɪk configuration](/basics#static-trfk-configuration) which is loaded only at the begining. 
+- The [dynamic Træfɪk configuration](/basics#dynamic-trfk-configuration) which can be hot-reloaded (no need to restart the process).
+
+
+## Static Træfɪk configuration
+
+The static configuration is the global configuration which setting up connections to configuration backends and entrypoints. 
+
+Træfɪk can be configured using many configuration sources with the following precedence order. 
+Each item takes precedence over the item below it:
+
+- [Key-value Store](/basics/#key-value-stores)
+- [Arguments](/basics/#arguments)
+- [Configuration file](/basics/#configuration-file)
+- Default
+
+It means that arguments overrides configuration file, and Key-value Store overrides arguments.
+
+### Configuration file
+
 By default, Træfɪk will try to find a `traefik.toml` in the following places:
 
 - `/etc/traefik/`
@@ -212,15 +291,63 @@ You can override this by setting a `configFile` argument:
 $ traefik --configFile=foo/bar/myconfigfile.toml
 ```
 
-Træfɪk uses the following precedence order. Each item takes precedence over the item below it:
+Please refer to the [global configuration](/toml/#global-configuration) section to get documentation on it.
 
-- arguments
-- configuration file
-- default
+### Arguments
 
-It means that arguments overrides configuration file.
-Each argument is described in the help section:
+Each argument (and command) is described in the help section:
 
 ```bash
 $ traefik --help
 ```
+
+Note that all default values will be displayed as well.
+
+### Key-value stores
+
+Træfɪk supports several Key-value stores:
+
+- [Consul](https://consul.io)
+- [etcd](https://coreos.com/etcd/)
+- [ZooKeeper](https://zookeeper.apache.org/) 
+- [boltdb](https://github.com/boltdb/bolt)
+
+Please refer to the [User Guide Key-value store configuration](/user-guide/kv-config/) section to get documentation on it.
+
+## Dynamic Træfɪk configuration
+
+The dynamic configuration concerns : 
+
+- [Frontends](/basics/#frontends)
+- [Backends](/basics/#backends) 
+- [Servers](/basics/#servers) 
+
+Træfɪk can hot-reload those rules which could be provided by [multiple configuration backends](/toml/#configuration-backends).
+
+We only need to enable `watch` option to make Træfɪk watch configuration backend changes and generate its configuration automatically.
+Routes to services will be created and updated instantly at any changes.
+
+Please refer to the [configuration backends](/toml/#configuration-backends) section to get documentation on it.
+
+# Commands
+
+Usage: `traefik [command] [--flag=flag_argument]`
+
+List of Træfɪk available commands with description :                                                             
+
+- `version` : Print version 
+- `storeconfig` : Store the static traefik configuration into a Key-value stores. Please refer to the [Store Træfɪk configuration](/user-guide/kv-config/#store-trfk-configuration) section to get documentation on it.
+
+Each command may have related flags. 
+All those related flags will be displayed with :
+
+```bash
+$ traefik [command] --help
+```
+
+Note that each command is described at the begining of the help section:
+
+```bash
+$ traefik --help
+```
+

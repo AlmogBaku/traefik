@@ -47,6 +47,13 @@
 #
 # MaxIdleConnsPerHost = 200
 
+# If set to true invalid SSL certificates are accepted for backends.
+# Note: This disables detection of man-in-the-middle attacks so should only be used on secure backend networks.
+# Optional
+# Default: false
+#
+# InsecureSkipVerify = true
+
 # Entrypoints to be used by frontends that do not specify any entrypoint.
 # Each frontend can specify its own entrypoints.
 #
@@ -75,7 +82,7 @@
 # storageFile = "acme.json"
 
 # Entrypoint to proxy acme challenge to.
-# WARNING, must point to an entrypoint on port 443 
+# WARNING, must point to an entrypoint on port 443
 #
 # Required
 #
@@ -143,6 +150,25 @@
 #     [entryPoints.http.redirect]
 #       regex = "^http://localhost/(.*)"
 #       replacement = "http://mydomain/$1"
+#
+# To enable basic auth on an entrypoint
+# with 2 user/pass: test:test and test2:test2
+# Passwords can be encoded in MD5, SHA1 and BCrypt: you can use htpasswd to generate those ones
+# [entryPoints]
+#   [entryPoints.http]
+#   address = ":80"
+#   [entryPoints.http.auth.basic]
+#   users = ["test:$apr1$H6uskkkW$IgXLP6ewTrSuBkTrqE8wj/", "test2:$apr1$d9hr9HBB$4HxwgUir3HP4EsggP/QNo0"]
+#
+# To enable digest auth on an entrypoint
+# with 2 user/realm/pass: test:traefik:test and test2:traefik:test2
+# You can use htdigest to generate those ones
+# [entryPoints]
+#   [entryPoints.http]
+#   address = ":80"
+#   [entryPoints.http.auth.basic]
+#   users = ["test:traefik:a2688e031edb4be6a3797f3882655c05 ", "test2:traefik:518845800f9e2bfb1f1f740ec24f074e"]
+
 
 # Enable retry sending request if network error
 #
@@ -156,13 +182,6 @@
 # Default: (number servers in backend) -1
 #
 # attempts = 3
-
-# Sets the maximum request body to be stored in memory in Mo
-#
-# Optional
-# Default: 2
-#
-# maxMem = 3
 
 ################################################################
 # Web configuration backend
@@ -253,6 +272,13 @@
 #
 # filename = "docker.tmpl"
 
+# Expose containers by default in traefik
+#
+# Optional
+# Default: true
+#
+# exposedbydefault = true
+
 # Enable docker TLS connection
 #
 # Optional
@@ -325,12 +351,82 @@
 #  httpBasicAuthUser = "foo"
 #  httpBasicPassword = "bar"
 
+# DCOSToken for DCOS environment, This will override the Authorization header
+#
+# Optional
+#
+# dcosToken = "xxxxxx"
+
+
+################################################################
+# Mesos configuration backend
+################################################################
+
+# Enable Mesos configuration backend
+#
+# Optional
+#
+# [mesos]
+
+# Mesos server endpoint.
+# You can also specify multiple endpoint for Mesos:
+# endpoint = "192.168.35.40:5050,192.168.35.41:5050,192.168.35.42:5050"
+# endpoint = "zk://192.168.35.20:2181,192.168.35.21:2181,192.168.35.22:2181/mesos"
+#
+# Required
+#
+# endpoint = "http://127.0.0.1:8080"
+
+# Enable watch Mesos changes
+#
+# Optional
+#
+# watch = true
+
+# Default domain used.
+# Can be overridden by setting the "traefik.domain" label on an application.
+#
+# Required
+#
+# domain = "mesos.localhost"
+
+# Override default configuration template. For advanced users :)
+#
+# Optional
+#
+# filename = "mesos.tmpl"
+
+# Expose Mesos apps by default in traefik
+#
+# Optional
+# Default: false
+#
+# ExposedByDefault = true
+
 # TLS client configuration. https://golang.org/pkg/crypto/tls/#Config
 #
 # Optional
 #
-# [marathon.TLS]
+# [mesos.TLS]
 # InsecureSkipVerify = true
+
+#
+#
+# Optional
+#
+# ZkDetectionTimeout = 30
+
+#
+#
+# Optional
+#
+# RefreshSeconds = 30
+
+#
+#
+# Optional
+#
+# IPSources = "host"
 
 ################################################################
 # Kubernetes Ingress configuration backend
@@ -348,11 +444,14 @@
 # and KUBERNETES_SERVICE_PORT_HTTPS as endpoint
 # Secure token will be found in /var/run/secrets/kubernetes.io/serviceaccount/token
 # and SSL CA cert in /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
-# 
+#
 # Optional
 #
 # endpoint = "http://localhost:8080"
 # namespaces = ["default"]
+#
+# See: http://kubernetes.io/docs/user-guide/labels/#list-and-watch-filtering
+# labelselector = "A and not B"
 
 ################################################################
 # Consul KV configuration backend
@@ -413,7 +512,7 @@
 #
 # Required
 #
-# endpoint = "127.0.0.1:4001"
+# endpoint = "127.0.0.1:2379"
 
 # Enable watch Etcd changes
 #

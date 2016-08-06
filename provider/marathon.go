@@ -8,7 +8,6 @@ import (
 	"strings"
 	"text/template"
 
-	"crypto/tls"
 	"github.com/BurntSushi/ty/fun"
 	log "github.com/Sirupsen/logrus"
 	"github.com/cenkalti/backoff"
@@ -22,12 +21,13 @@ import (
 // Marathon holds configuration of the Marathon provider.
 type Marathon struct {
 	BaseProvider
-	Endpoint           string `description:"Marathon server endpoint. You can also specify multiple endpoint for Marathon"`
-	Domain             string `description:"Default domain used"`
-	ExposedByDefault   bool   `description:"Expose Marathon apps by default"`
-	GroupsAsSubDomains bool   `description:"Convert Marathon groups to subdomains"`
+	Endpoint           string     `description:"Marathon server endpoint. You can also specify multiple endpoint for Marathon"`
+	Domain             string     `description:"Default domain used"`
+	ExposedByDefault   bool       `description:"Expose Marathon apps by default"`
+	GroupsAsSubDomains bool       `description:"Convert Marathon groups to subdomains"`
+	DCOSToken          string     `description:"DCOSToken for DCOS environment, This will override the Authorization header"`
+	TLS                *ClientTLS `description:"Enable Docker TLS support"`
 	Basic              *MarathonBasic
-	TLS                *tls.Config
 	marathonClient     marathon.Marathon
 }
 
@@ -54,9 +54,16 @@ func (provider *Marathon) Provide(configurationChan chan<- types.ConfigMessage, 
 			config.HTTPBasicAuthUser = provider.Basic.HTTPBasicAuthUser
 			config.HTTPBasicPassword = provider.Basic.HTTPBasicPassword
 		}
+		if len(provider.DCOSToken) > 0 {
+			config.DCOSToken = provider.DCOSToken
+		}
+		TLSConfig, err := provider.TLS.CreateTLSConfig()
+		if err != nil {
+			return err
+		}
 		config.HTTPClient = &http.Client{
 			Transport: &http.Transport{
-				TLSClientConfig: provider.TLS,
+				TLSClientConfig: TLSConfig,
 			},
 		}
 		client, err := marathon.NewClient(config)
@@ -67,7 +74,7 @@ func (provider *Marathon) Provide(configurationChan chan<- types.ConfigMessage, 
 		provider.marathonClient = client
 		update := make(marathon.EventsChannel, 5)
 		if provider.Watch {
-			if err := client.AddEventsListener(update, marathon.EVENTS_APPLICATIONS); err != nil {
+			if err := client.AddEventsListener(update, marathon.EventIDApplications); err != nil {
 				log.Errorf("Failed to register for events, %s", err)
 				return err
 			}
@@ -179,8 +186,8 @@ func taskFilter(task marathon.Task, applications *marathon.Applications, exposed
 	}
 
 	//filter indeterminable task port
-	portIndexLabel := application.Labels["traefik.portIndex"]
-	portValueLabel := application.Labels["traefik.port"]
+	portIndexLabel := (*application.Labels)["traefik.portIndex"]
+	portValueLabel := (*application.Labels)["traefik.port"]
 	if portIndexLabel != "" && portValueLabel != "" {
 		log.Debugf("Filtering marathon task %s specifying both traefik.portIndex and traefik.port labels", task.AppID)
 		return false
@@ -190,14 +197,14 @@ func taskFilter(task marathon.Task, applications *marathon.Applications, exposed
 		return false
 	}
 	if portIndexLabel != "" {
-		index, err := strconv.Atoi(application.Labels["traefik.portIndex"])
+		index, err := strconv.Atoi((*application.Labels)["traefik.portIndex"])
 		if err != nil || index < 0 || index > len(application.Ports)-1 {
 			log.Debugf("Filtering marathon task %s with unexpected value for traefik.portIndex label", task.AppID)
 			return false
 		}
 	}
 	if portValueLabel != "" {
-		port, err := strconv.Atoi(application.Labels["traefik.port"])
+		port, err := strconv.Atoi((*application.Labels)["traefik.port"])
 		if err != nil {
 			log.Debugf("Filtering marathon task %s with unexpected value for traefik.port label", task.AppID)
 			return false
@@ -251,11 +258,11 @@ func getApplication(task marathon.Task, apps []marathon.Application) (marathon.A
 }
 
 func isApplicationEnabled(application marathon.Application, exposedByDefault bool) bool {
-	return exposedByDefault && application.Labels["traefik.enable"] != "false" || application.Labels["traefik.enable"] == "true"
+	return exposedByDefault && (*application.Labels)["traefik.enable"] != "false" || (*application.Labels)["traefik.enable"] == "true"
 }
 
 func (provider *Marathon) getLabel(application marathon.Application, label string) (string, error) {
-	for key, value := range application.Labels {
+	for key, value := range *application.Labels {
 		if key == label {
 			return value, nil
 		}
@@ -340,14 +347,6 @@ func (provider *Marathon) getEntryPoints(application marathon.Application) []str
 // getFrontendRule returns the frontend rule for the specified application, using
 // it's label. It returns a default one (Host) if the label is not present.
 func (provider *Marathon) getFrontendRule(application marathon.Application) string {
-	// ⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠
-	// TODO: backwards compatibility with DEPRECATED rule.Value
-	if value, err := provider.getLabel(application, "traefik.frontend.value"); err == nil {
-		log.Warnf("Label traefik.frontend.value=%s is DEPRECATED, please refer to the rule label: https://github.com/containous/traefik/blob/master/docs/index.md#marathon", value)
-		rule, _ := provider.getLabel(application, "traefik.frontend.rule")
-		return rule + ":" + value
-	}
-	// ⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠
 	if label, err := provider.getLabel(application, "traefik.frontend.rule"); err == nil {
 		return label
 	}

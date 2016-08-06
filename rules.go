@@ -106,6 +106,11 @@ func (r *Rules) Parse(expression string) (*mux.Route, error) {
 		"Headers":         r.headers,
 		"HeadersRegexp":   r.headersRegexp,
 	}
+
+	if len(expression) == 0 {
+		return nil, errors.New("Empty rule")
+	}
+
 	f := func(c rune) bool {
 		return c == ':'
 	}
@@ -123,11 +128,11 @@ func (r *Rules) Parse(expression string) (*mux.Route, error) {
 		// get function
 		parsedFunctions := strings.FieldsFunc(rule, f)
 		if len(parsedFunctions) == 0 {
-			return nil, errors.New("Error parsing rule: " + rule)
+			return nil, errors.New("Error parsing rule: '" + rule + "'")
 		}
-		parsedFunction, ok := functions[parsedFunctions[0]]
+		parsedFunction, ok := functions[strings.TrimSpace(parsedFunctions[0])]
 		if !ok {
-			return nil, errors.New("Error parsing rule: " + rule + ". Unknown function: " + parsedFunctions[0])
+			return nil, errors.New("Error parsing rule: '" + rule + "'. Unknown function: '" + parsedFunctions[0] + "'")
 		}
 		parsedFunctions = append(parsedFunctions[:0], parsedFunctions[1:]...)
 		fargs := func(c rune) bool {
@@ -136,12 +141,12 @@ func (r *Rules) Parse(expression string) (*mux.Route, error) {
 		// get function
 		parsedArgs := strings.FieldsFunc(strings.Join(parsedFunctions, ":"), fargs)
 		if len(parsedArgs) == 0 {
-			return nil, errors.New("Error parsing args from rule: " + rule)
+			return nil, errors.New("Error parsing args from rule: '" + rule + "'")
 		}
 
 		inputs := make([]reflect.Value, len(parsedArgs))
 		for i := range parsedArgs {
-			inputs[i] = reflect.ValueOf(parsedArgs[i])
+			inputs[i] = reflect.ValueOf(strings.TrimSpace(parsedArgs[i]))
 		}
 		method := reflect.ValueOf(parsedFunction)
 		if method.IsValid() {
@@ -154,7 +159,7 @@ func (r *Rules) Parse(expression string) (*mux.Route, error) {
 			}
 
 		} else {
-			return nil, errors.New("Method not found: " + parsedFunctions[0])
+			return nil, errors.New("Method not found: '" + parsedFunctions[0] + "'")
 		}
 	}
 	return resultRoute, nil

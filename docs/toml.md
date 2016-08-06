@@ -46,6 +46,13 @@
 #
 # MaxIdleConnsPerHost = 200
 
+# If set to true invalid SSL certificates are accepted for backends.
+# Note: This disables detection of man-in-the-middle attacks so should only be used on secure backend networks.
+# Optional
+# Default: false
+#
+# InsecureSkipVerify = true
+
 # Entrypoints to be used by frontends that do not specify any entrypoint.
 # Each frontend can specify its own entrypoints.
 #
@@ -89,6 +96,44 @@
 #     [entryPoints.http.redirect]
 #       regex = "^http://localhost/(.*)"
 #       replacement = "http://mydomain/$1"
+#
+# Only accept clients that present a certificate signed by a specified
+# Certificate Authority (CA)
+# ClientCAFiles can be configured with multiple CA:s in the same file or
+# use multiple files containing one or several CA:s. The CA:s has to be in PEM format.
+# All clients will be required to present a valid cert.
+# The requirement will apply to all server certs in the entrypoint
+# In the example below both snitest.com and snitest.org will require client certs
+#
+# [entryPoints]
+#   [entryPoints.https]
+#   address = ":443"
+#   [entryPoints.https.tls]
+#   ClientCAFiles = ["tests/clientca1.crt", "tests/clientca2.crt"]
+#     [[entryPoints.https.tls.certificates]]
+#     CertFile = "integration/fixtures/https/snitest.com.cert"
+#     KeyFile = "integration/fixtures/https/snitest.com.key"
+#     [[entryPoints.https.tls.certificates]]
+#     CertFile = "integration/fixtures/https/snitest.org.cert"
+#     KeyFile = "integration/fixtures/https/snitest.org.key"
+#
+# To enable basic auth on an entrypoint
+# with 2 user/pass: test:test and test2:test2
+# Passwords can be encoded in MD5, SHA1 and BCrypt: you can use htpasswd to generate those ones
+# [entryPoints]
+#   [entryPoints.http]
+#   address = ":80"
+#   [entryPoints.http.auth.basic]
+#   users = ["test:$apr1$H6uskkkW$IgXLP6ewTrSuBkTrqE8wj/", "test2:$apr1$d9hr9HBB$4HxwgUir3HP4EsggP/QNo0"]
+#
+# To enable digest auth on an entrypoint
+# with 2 user/realm/pass: test:traefik:test and test2:traefik:test2
+# You can use htdigest to generate those ones
+# [entryPoints]
+#   [entryPoints.http]
+#   address = ":80"
+#   [entryPoints.http.auth.basic]
+#   users = ["test:traefik:a2688e031edb4be6a3797f3882655c05 ", "test2:traefik:518845800f9e2bfb1f1f740ec24f074e"]
 
 [entryPoints]
   [entryPoints.http]
@@ -110,13 +155,6 @@
 # Default: (number servers in backend) -1
 #
 # attempts = 3
-
-# Sets the maximum request body to be stored in memory in Mo
-#
-# Optional
-# Default: 2
-#
-# maxMem = 3
 ```
 
 ## ACME (Let's Encrypt) configuration
@@ -141,7 +179,13 @@
 email = "test@traefik.io"
 
 # File used for certificates storage.
-# WARNING, if you use Traefik in Docker, don't forget to mount this file as a volume.
+# WARNING, if you use Traefik in Docker, you have 2 options:
+#  - create a file on your host and mount it has a volume
+#      storageFile = "acme.json"
+#      $ docker run -v "/my/host/acme.json:acme.json" traefik
+#  - mount the folder containing the file has a volume
+#      storageFile = "/etc/traefik/acme/acme.json"
+#      $ docker run -v "/my/host/acme:/etc/traefik/acme" traefik
 #
 # Required
 #
@@ -194,51 +238,6 @@ entryPoint = "https"
 [[acme.domains]]
    main = "local4.com"
 ```
-
-## Constraints
-
-In a micro-service architecture, with a central service discovery, setting constraints limits Træfɪk scope to a smaller number of routes.
-
-Træfɪk filters services according to service attributes/tags set in your configuration backends.
-
-Supported backends:
-
-- Consul Catalog
-
-Supported filters:
-
-- ```tag```
-
-```
-# Constraints definition
-
-#
-# Optional
-#
-
-# Simple matching constraint
-# constraints = ["tag==api"]
-
-# Simple mismatching constraint
-# constraints = ["tag!=api"]
-
-# Globbing
-# constraints = ["tag==us-*"]
-
-# Backend-specific constraint
-# [consulCatalog]
-#   endpoint = 127.0.0.1:8500
-#   constraints = ["tag==api"]
-
-# Multiple constraints
-#   - "tag==" must match with at least one tag
-#   - "tag!=" must match with none of tags
-# constraints = ["tag!=us-*", "tag!=asia-*"]
-# [consulCatalog]
-#   endpoint = 127.0.0.1:8500
-#   constraints = ["tag==api", "tag!=v*-beta"]
-```
-
 
 # Configuration backends
 
@@ -567,6 +566,13 @@ watch = true
 #
 # filename = "docker.tmpl"
 
+# Expose containers by default in traefik
+#
+# Optional
+# Default: true
+#
+exposedbydefault = true
+
 # Enable docker TLS connection
 #
 #  [docker.tls]
@@ -587,7 +593,6 @@ Labels can be used on containers to override default behaviour:
 - `traefik.frontend.passHostHeader=true`: forward client `Host` header to the backend.
 - `traefik.frontend.priority=10`: override default frontend priority
 - `traefik.frontend.entryPoints=http,https`: assign this frontend to entry points `http` and `https`. Overrides `defaultEntryPoints`.
-- `traefik.domain=traefik.localhost`: override the default domain
 - `traefik.docker.network`: Set the docker network to use for connections to this container
 
 
@@ -622,7 +627,6 @@ endpoint = "http://127.0.0.1:8080"
 watch = true
 
 # Default domain used.
-# Can be overridden by setting the "traefik.domain" label on an application.
 #
 # Required
 #
@@ -664,6 +668,12 @@ domain = "marathon.localhost"
 #
 # [marathon.TLS]
 # InsecureSkipVerify = true
+
+# DCOSToken for DCOS environment, This will override the Authorization header
+#
+# Optional
+#
+# dcosToken = "xxxxxx"
 ```
 
 Labels can be used on containers to override default behaviour:
@@ -678,7 +688,6 @@ Labels can be used on containers to override default behaviour:
 - `traefik.frontend.passHostHeader=true`: forward client `Host` header to the backend.
 - `traefik.frontend.priority=10`: override default frontend priority
 - `traefik.frontend.entryPoints=http,https`: assign this frontend to entry points `http` and `https`. Overrides `defaultEntryPoints`.
-- `traefik.domain=traefik.localhost`: override the default domain
 
 
 ## Kubernetes Ingress backend
@@ -708,6 +717,10 @@ Træfɪk can be configured to use Kubernetes Ingress as a backend configuration:
 #
 # endpoint = "http://localhost:8080"
 # namespaces = ["default","production"]
+#
+# See: http://kubernetes.io/docs/user-guide/labels/#list-and-watch-filtering
+# labelselector = "A and not B"
+#
 ```
 
 Annotations can be used on containers to override default behaviour for the whole Ingress resource:
@@ -766,7 +779,7 @@ prefix = "traefik"
 # insecureskipverify = true
 ```
 
-Please refer to the [Key Value storage structure](#key-value-storage-structure) section to get documentation en traefik KV structure.
+Please refer to the [Key Value storage structure](/user-guide/kv-config/#key-value-storage-structure) section to get documentation on traefik KV structure.
 
 ## Consul catalog backend
 
@@ -800,13 +813,6 @@ domain = "consul.localhost"
 # Optional
 #
 prefix = "traefik"
-
-# Constraint on Consul catalog tags
-#
-# Optional
-#
-constraints = ["tag==api", "tag==he*ld"]
-# Matching with containers having this tag: "traefik.tags=api,helloworld"
 ```
 
 This backend will create routes matching on hostname based on the service name
@@ -843,7 +849,7 @@ Træfɪk can be configured to use Etcd as a backend configuration:
 #
 # Required
 #
-endpoint = "127.0.0.1:4001"
+endpoint = "127.0.0.1:2379"
 
 # Enable watch Etcd changes
 #
@@ -874,7 +880,7 @@ prefix = "/traefik"
 # insecureskipverify = true
 ```
 
-Please refer to the [Key Value storage structure](#key-value-storage-structure) section to get documentation en traefik KV structure.
+Please refer to the [Key Value storage structure](/user-guide/kv-config/#key-value-storage-structure) section to get documentation on traefik KV structure.
 
 
 ## Zookeeper backend
@@ -917,7 +923,7 @@ prefix = "/traefik"
 # filename = "zookeeper.tmpl"
 ```
 
-Please refer to the [Key Value storage structure](#key-value-storage-structure) section to get documentation en traefik KV structure.
+Please refer to the [Key Value storage structure](/user-guide/kv-config/#key-value-storage-structure) section to get documentation on traefik KV structure.
 
 ## BoltDB backend
 
@@ -959,85 +965,4 @@ prefix = "/traefik"
 # filename = "boltdb.tmpl"
 ```
 
-Please refer to the [Key Value storage structure](#key-value-storage-structure) section to get documentation en traefik KV structure.
-
-## Key-value storage structure
-
-The Keys-Values structure should look (using `prefix = "/traefik"`):
-
-- backend 1
-
-| Key                                                    | Value                       |
-|--------------------------------------------------------|-----------------------------|
-| `/traefik/backends/backend1/circuitbreaker/expression` | `NetworkErrorRatio() > 0.5` |
-| `/traefik/backends/backend1/servers/server1/url`       | `http://172.17.0.2:80`      |
-| `/traefik/backends/backend1/servers/server1/weight`    | `10`                        |
-| `/traefik/backends/backend1/servers/server2/url`       | `http://172.17.0.3:80`      |
-| `/traefik/backends/backend1/servers/server2/weight`    | `1`                         |
-
-- backend 2
-
-| Key                                                 | Value                  |
-|-----------------------------------------------------|------------------------|
-| `/traefik/backends/backend2/maxconn/amount`         | `10`                   |
-| `/traefik/backends/backend2/maxconn/extractorfunc`  | `request.host`         |
-| `/traefik/backends/backend2/loadbalancer/method`    | `drr`                  |
-| `/traefik/backends/backend2/servers/server1/url`    | `http://172.17.0.4:80` |
-| `/traefik/backends/backend2/servers/server1/weight` | `1`                    |
-| `/traefik/backends/backend2/servers/server2/url`    | `http://172.17.0.5:80` |
-| `/traefik/backends/backend2/servers/server2/weight` | `2`                    |
-
-- frontend 1
-
-| Key                                               | Value                 |
-|---------------------------------------------------|-----------------------|
-| `/traefik/frontends/frontend1/backend`            | `backend2`            |
-| `/traefik/frontends/frontend1/routes/test_1/rule` | `Host:test.localhost` |
-
-- frontend 2
-
-| Key                                                | Value              |
-|----------------------------------------------------|--------------------|
-| `/traefik/frontends/frontend2/backend`             | `backend1`         |
-| `/traefik/frontends/frontend2/passHostHeader`      | `true`             |
-| `/traefik/frontends/frontend2/priority`            | `10`               |
-| `/traefik/frontends/frontend2/entrypoints`         | `http,https`       |
-| `/traefik/frontends/frontend2/routes/test_2/rule`  | `PathPrefix:/test` |
-
-## Atomic configuration changes
-
-The [Etcd](https://github.com/coreos/etcd/issues/860) and [Consul](https://github.com/hashicorp/consul/issues/886) backends do not support updating multiple keys atomically. As a result, it may be possible for Træfɪk to read an intermediate configuration state despite judicious use of the `--providersThrottleDuration` flag. To solve this problem, Træfɪk supports a special key called `/traefik/alias`. If set, Træfɪk use the value as an alternative key prefix.
-
-Given the key structure below, Træfɪk will use the `http://172.17.0.2:80` as its only backend (frontend keys have been omitted for brevity).
-
-| Key                                                                     | Value                       |
-|-------------------------------------------------------------------------|-----------------------------|
-| `/traefik/alias`                                                        | `/traefik_configurations/1` |
-| `/traefik_configurations/1/backends/backend1/servers/server1/url`       | `http://172.17.0.2:80`      |
-| `/traefik_configurations/1/backends/backend1/servers/server1/weight`    | `10`                        |
-
-When an atomic configuration change is required, you may write a new configuration at an alternative prefix. Here, although the `/traefik_configurations/2/...` keys have been set, the old configuration is still active because the `/traefik/alias` key still points to `/traefik_configurations/1`:
-
-| Key                                                                     | Value                       |
-|-------------------------------------------------------------------------|-----------------------------|
-| `/traefik/alias`                                                        | `/traefik_configurations/1` |
-| `/traefik_configurations/1/backends/backend1/servers/server1/url`       | `http://172.17.0.2:80`      |
-| `/traefik_configurations/1/backends/backend1/servers/server1/weight`    | `10`                        |
-| `/traefik_configurations/2/backends/backend1/servers/server1/url`       | `http://172.17.0.2:80`      |
-| `/traefik_configurations/2/backends/backend1/servers/server1/weight`    | `5`                        |
-| `/traefik_configurations/2/backends/backend1/servers/server2/url`       | `http://172.17.0.3:80`      |
-| `/traefik_configurations/2/backends/backend1/servers/server2/weight`    | `5`                        |
-
-Once the `/traefik/alias` key is updated, the new `/traefik_configurations/2` configuration becomes active atomically. Here, we have a 50% balance between the `http://172.17.0.3:80` and the `http://172.17.0.4:80` hosts while no traffic is sent to the `172.17.0.2:80` host:
-
-| Key                                                                     | Value                       |
-|-------------------------------------------------------------------------|-----------------------------|
-| `/traefik/alias`                                                        | `/traefik_configurations/2` |
-| `/traefik_configurations/1/backends/backend1/servers/server1/url`       | `http://172.17.0.2:80`      |
-| `/traefik_configurations/1/backends/backend1/servers/server1/weight`    | `10`                        |
-| `/traefik_configurations/2/backends/backend1/servers/server1/url`       | `http://172.17.0.3:80`      |
-| `/traefik_configurations/2/backends/backend1/servers/server1/weight`    | `5`                        |
-| `/traefik_configurations/2/backends/backend1/servers/server2/url`       | `http://172.17.0.4:80`      |
-| `/traefik_configurations/2/backends/backend1/servers/server2/weight`    | `5`                        |
-
-Note that Træfɪk *will not watch for key changes in the `/traefik_configurations` prefix*. It will only watch for changes in the `/traefik` prefix. Further, if the `/traefik/alias` key is set, all other sibling keys with the `/traefik` prefix are ignored.
+Please refer to the [Key Value storage structure](/user-guide/kv-config/#key-value-storage-structure) section to get documentation on traefik KV structure.

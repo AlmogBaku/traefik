@@ -40,10 +40,6 @@ type Server struct {
 // Route holds route configuration.
 type Route struct {
 	Rule string `json:"rule,omitempty"`
-	// ⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠
-	// TODO: backwards compatibility with DEPRECATED rule.Value
-	Value string `json:"value,omitempty"`
-	// ⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠⚠
 }
 
 // Frontend holds frontend configuration.
@@ -186,4 +182,23 @@ func (cs *Constraints) SetValue(val interface{}) {
 // Type exports the Constraints type as a string
 func (cs *Constraints) Type() string {
 	return fmt.Sprint("constraint")
+}
+
+// Auth holds authentication configuration (BASIC, DIGEST, users)
+type Auth struct {
+	Basic  *Basic
+	Digest *Digest
+}
+
+// Users authentication users
+type Users []string
+
+// Basic HTTP basic authentication
+type Basic struct {
+	Users
+}
+
+// Digest HTTP authentication
+type Digest struct {
+	Users
 }

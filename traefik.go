@@ -1,15 +1,9 @@
 package main
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	log "github.com/Sirupsen/logrus"
-	"github.com/containous/flaeg"
-	"github.com/containous/staert"
-	"github.com/containous/traefik/acme"
-	"github.com/containous/traefik/middlewares"
-	"github.com/containous/traefik/provider"
-	"github.com/containous/traefik/types"
 	fmtlog "log"
 	"net/http"
 	"os"
@@ -17,9 +11,20 @@ import (
 	"runtime"
 	"strings"
 	"text/template"
+
+	log "github.com/Sirupsen/logrus"
+	"github.com/containous/flaeg"
+	"github.com/containous/staert"
+	"github.com/containous/traefik/acme"
+	"github.com/containous/traefik/middlewares"
+	"github.com/containous/traefik/provider"
+	"github.com/containous/traefik/types"
+	"github.com/containous/traefik/version"
+	"github.com/docker/libkv/store"
 )
 
 var versionTemplate = `Version:      {{.Version}}
+Codename:     {{.Codename}}
 Go version:   {{.GoVersion}}
 Built:        {{.BuildTime}}
 OS/Arch:      {{.Os}}/{{.Arch}}`
@@ -57,14 +62,16 @@ Complete documentation is available at https://traefik.io`,
 
 			v := struct {
 				Version   string
+				Codename  string
 				GoVersion string
 				BuildTime string
 				Os        string
 				Arch      string
 			}{
-				Version:   Version,
+				Version:   version.Version,
+				Codename:  version.Codename,
 				GoVersion: runtime.Version(),
-				BuildTime: BuildDate,
+				BuildTime: version.BuildDate,
 				Os:        runtime.GOOS,
 				Arch:      runtime.GOARCH,
 			}
@@ -78,6 +85,28 @@ Complete documentation is available at https://traefik.io`,
 		},
 	}
 
+	//storeconfig Command init
+	var kv *staert.KvSource
+	var err error
+
+	storeconfigCmd := &flaeg.Command{
+		Name:                  "storeconfig",
+		Description:           `Store the static traefik configuration into a Key-value stores. Traefik will not start.`,
+		Config:                traefikConfiguration,
+		DefaultPointersConfig: traefikPointersConfiguration,
+		Run: func() error {
+			if kv == nil {
+				return fmt.Errorf("Error using command storeconfig, no Key-value store defined")
+			}
+			jsonConf, _ := json.Marshal(traefikConfiguration.GlobalConfiguration)
+			fmtlog.Printf("Storing configuration: %s\n", jsonConf)
+			return kv.StoreConfig(traefikConfiguration.GlobalConfiguration)
+		},
+		Metadata: map[string]string{
+			"parseAllSources": "true",
+		},
+	}
+
 	//init flaeg source
 	f := flaeg.New(traefikCmd, os.Args[1:])
 	//add custom parsers
@@ -87,9 +116,17 @@ Complete documentation is available at https://traefik.io`,
 	f.AddParser(reflect.TypeOf(provider.Namespaces{}), &provider.Namespaces{})
 	f.AddParser(reflect.TypeOf([]acme.Domain{}), &acme.Domains{})
 
-	//add version command
+	//add commands
 	f.AddCommand(versionCmd)
-	if _, err := f.Parse(traefikCmd); err != nil {
+	f.AddCommand(storeconfigCmd)
+
+	usedCmd, err := f.GetCommand()
+	if err != nil {
+		fmtlog.Println(err)
+		os.Exit(-1)
+	}
+
+	if _, err := f.Parse(usedCmd); err != nil {
 		fmtlog.Println(err)
 		os.Exit(-1)
 	}
@@ -104,9 +141,25 @@ Complete documentation is available at https://traefik.io`,
 	s.AddSource(f)
 	if _, err := s.LoadConfig(); err != nil {
 		fmtlog.Println(fmt.Errorf("Error reading TOML config file %s : %s", toml.ConfigFileUsed(), err))
+		os.Exit(-1)
 	}
 
 	traefikConfiguration.ConfigFile = toml.ConfigFileUsed()
+
+	kv, err = CreateKvSource(traefikConfiguration)
+	if err != nil {
+		fmtlog.Println(err)
+		os.Exit(-1)
+	}
+
+	// IF a KV Store is enable and no sub-command called in args
+	if kv != nil && usedCmd == traefikCmd {
+		s.AddSource(kv)
+		if _, err := s.LoadConfig(); err != nil {
+			fmtlog.Println(err)
+			os.Exit(-1)
+		}
+	}
 
 	if err := s.Run(); err != nil {
 		fmtlog.Println(err)
@@ -123,6 +176,9 @@ func run(traefikConfiguration *TraefikConfiguration) {
 	globalConfiguration := traefikConfiguration.GlobalConfiguration
 
 	http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = globalConfiguration.MaxIdleConnsPerHost
+	if globalConfiguration.InsecureSkipVerify {
+		http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	}
 	loggerMiddleware := middlewares.NewLogger(globalConfiguration.AccessLogsFile)
 	defer loggerMiddleware.Close()
 
@@ -154,7 +210,7 @@ func run(traefikConfiguration *TraefikConfiguration) {
 		fi, err := os.OpenFile(globalConfiguration.TraefikLogsFile, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 		defer func() {
 			if err := fi.Close(); err != nil {
-				log.Error("Error closinf file", err)
+				log.Error("Error closing file", err)
 			}
 		}()
 		if err != nil {
@@ -167,7 +223,7 @@ func run(traefikConfiguration *TraefikConfiguration) {
 		log.SetFormatter(&log.TextFormatter{FullTimestamp: true, DisableSorting: true})
 	}
 	jsonConf, _ := json.Marshal(globalConfiguration)
-	log.Infof("Traefik version %s built on %s", Version, BuildDate)
+	log.Infof("Traefik version %s built on %s", version.Version, version.BuildDate)
 	if len(traefikConfiguration.ConfigFile) != 0 {
 		log.Infof("Using TOML configuration file %s", traefikConfiguration.ConfigFile)
 	}
@@ -176,4 +232,40 @@ func run(traefikConfiguration *TraefikConfiguration) {
 	server.Start()
 	defer server.Close()
 	log.Info("Shutting down")
+}
+
+// CreateKvSource creates KvSource
+// TLS support is enable for Consul and ects backends
+func CreateKvSource(traefikConfiguration *TraefikConfiguration) (*staert.KvSource, error) {
+	var kv *staert.KvSource
+	var store store.Store
+	var err error
+
+	switch {
+	case traefikConfiguration.Consul != nil:
+		store, err = traefikConfiguration.Consul.CreateStore()
+		kv = &staert.KvSource{
+			Store:  store,
+			Prefix: traefikConfiguration.Consul.Prefix,
+		}
+	case traefikConfiguration.Etcd != nil:
+		store, err = traefikConfiguration.Etcd.CreateStore()
+		kv = &staert.KvSource{
+			Store:  store,
+			Prefix: traefikConfiguration.Etcd.Prefix,
+		}
+	case traefikConfiguration.Zookeeper != nil:
+		store, err = traefikConfiguration.Zookeeper.CreateStore()
+		kv = &staert.KvSource{
+			Store:  store,
+			Prefix: traefikConfiguration.Zookeeper.Prefix,
+		}
+	case traefikConfiguration.Boltdb != nil:
+		store, err = traefikConfiguration.Boltdb.CreateStore()
+		kv = &staert.KvSource{
+			Store:  store,
+			Prefix: traefikConfiguration.Boltdb.Prefix,
+		}
+	}
+	return kv, err
 }

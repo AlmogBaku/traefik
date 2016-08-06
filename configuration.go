@@ -1,11 +1,13 @@
 package main
 
 import (
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"github.com/containous/traefik/acme"
 	"github.com/containous/traefik/provider"
 	"github.com/containous/traefik/types"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -13,14 +15,14 @@ import (
 
 // TraefikConfiguration holds GlobalConfiguration and other stuff
 type TraefikConfiguration struct {
-	GlobalConfiguration
-	ConfigFile string `short:"c" description:"Configuration file to use (TOML)."`
+	GlobalConfiguration `mapstructure:",squash"`
+	ConfigFile          string `short:"c" description:"Configuration file to use (TOML)."`
 }
 
 // GlobalConfiguration holds global configuration (with providers, etc.).
 // It's populated from the traefik configuration file passed as an argument to the binary.
 type GlobalConfiguration struct {
-	GraceTimeOut              int64                   `short:"g" description:"Configuration file to use (TOML)."`
+	GraceTimeOut              int64                   `short:"g" description:"Duration to give active requests a chance to finish during hot-reload"`
 	Debug                     bool                    `short:"d" description:"Enable debug mode"`
 	AccessLogsFile            string                  `description:"Access logs file"`
 	TraefikLogsFile           string                  `description:"Traefik logs file"`
@@ -31,6 +33,7 @@ type GlobalConfiguration struct {
 	DefaultEntryPoints        DefaultEntryPoints      `description:"Entrypoints to be used by frontends that do not specify any entrypoint"`
 	ProvidersThrottleDuration time.Duration           `description:"Backends throttle duration: minimum duration between 2 events from providers before applying a new configuration. It avoids unnecessary reloads if multiples events are sent in a short amount of time."`
 	MaxIdleConnsPerHost       int                     `description:"If non-zero, controls the maximum idle (keep-alive) to keep per-host.  If zero, DefaultMaxIdleConnsPerHost is used"`
+	InsecureSkipVerify        bool                    `description:"Disable SSL certificate verification"`
 	Retry                     *Retry                  `description:"Enable retry sending request if network error"`
 	Docker                    *provider.Docker        `description:"Enable Docker backend"`
 	File                      *provider.File          `description:"Enable File backend"`
@@ -42,6 +45,7 @@ type GlobalConfiguration struct {
 	Zookeeper                 *provider.Zookepper     `description:"Enable Zookeeper backend"`
 	Boltdb                    *provider.BoltDb        `description:"Enable Boltdb backend"`
 	Kubernetes                *provider.Kubernetes    `description:"Enable Kubernetes backend"`
+	Mesos                     *provider.Mesos         `description:"Enable Mesos backend"`
 }
 
 // DefaultEntryPoints holds default entry points
@@ -93,7 +97,7 @@ func (ep *EntryPoints) String() string {
 // Set's argument is a string to be parsed to set the flag.
 // It's a comma-separated list, so we split it.
 func (ep *EntryPoints) Set(value string) error {
-	regex := regexp.MustCompile("(?:Name:(?P<Name>\\S*))\\s*(?:Address:(?P<Address>\\S*))?\\s*(?:TLS:(?P<TLS>\\S*))?\\s*(?:Redirect.EntryPoint:(?P<RedirectEntryPoint>\\S*))?\\s*(?:Redirect.Regex:(?P<RedirectRegex>\\S*))?\\s*(?:Redirect.Replacement:(?P<RedirectReplacement>\\S*))?")
+	regex := regexp.MustCompile("(?:Name:(?P<Name>\\S*))\\s*(?:Address:(?P<Address>\\S*))?\\s*(?:TLS:(?P<TLS>\\S*))?\\s*((?P<TLSACME>TLS))?\\s*(?:CA:(?P<CA>\\S*))?\\s*(?:Redirect.EntryPoint:(?P<RedirectEntryPoint>\\S*))?\\s*(?:Redirect.Regex:(?P<RedirectRegex>\\S*))?\\s*(?:Redirect.Replacement:(?P<RedirectReplacement>\\S*))?")
 	match := regex.FindAllStringSubmatch(value, -1)
 	if match == nil {
 		return errors.New("Bad EntryPoints format: " + value)
@@ -114,6 +118,14 @@ func (ep *EntryPoints) Set(value string) error {
 		tls = &TLS{
 			Certificates: certs,
 		}
+	} else if len(result["TLSACME"]) > 0 {
+		tls = &TLS{
+			Certificates: Certificates{},
+		}
+	}
+	if len(result["CA"]) > 0 {
+		files := strings.Split(result["CA"], ",")
+		tls.ClientCAFiles = files
 	}
 	var redirect *Redirect
 	if len(result["RedirectEntryPoint"]) > 0 || len(result["RedirectRegex"]) > 0 || len(result["RedirectReplacement"]) > 0 {
@@ -152,6 +164,7 @@ type EntryPoint struct {
 	Address  string
 	TLS      *TLS
 	Redirect *Redirect
+	Auth     *types.Auth
 }
 
 // Redirect configures a redirection of an entry point to another, or to an URL
@@ -163,11 +176,50 @@ type Redirect struct {
 
 // TLS configures TLS for an entry point
 type TLS struct {
-	Certificates Certificates
+	Certificates  Certificates
+	ClientCAFiles []string
 }
 
 // Certificates defines traefik certificates type
+// Certs and Keys could be either a file path, or the file content itself
 type Certificates []Certificate
+
+//CreateTLSConfig creates a TLS config from Certificate structures
+func (certs *Certificates) CreateTLSConfig() (*tls.Config, error) {
+	config := &tls.Config{}
+	config.Certificates = []tls.Certificate{}
+	certsSlice := []Certificate(*certs)
+	for _, v := range certsSlice {
+		isAPath := false
+		_, errCert := os.Stat(v.CertFile)
+		_, errKey := os.Stat(v.KeyFile)
+		if errCert == nil {
+			if errKey == nil {
+				isAPath = true
+			} else {
+				return nil, fmt.Errorf("Bad TLS Certificate KeyFile format. Expected a path.")
+			}
+		} else if errKey == nil {
+			return nil, fmt.Errorf("Bad TLS Certificate KeyFile format. Expected a path.")
+		}
+
+		cert := tls.Certificate{}
+		var err error
+		if isAPath {
+			cert, err = tls.LoadX509KeyPair(v.CertFile, v.KeyFile)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			cert, err = tls.X509KeyPair([]byte(v.CertFile), []byte(v.KeyFile))
+			if err != nil {
+				return nil, err
+			}
+		}
+		config.Certificates = append(config.Certificates, cert)
+	}
+	return config, nil
+}
 
 // String is the method to format the flag's value, part of the flag.Value interface.
 // The String method's output will be used in diagnostics.
@@ -199,6 +251,7 @@ func (certs *Certificates) Type() string {
 }
 
 // Certificate holds a SSL cert/key pair
+// Certs and Key could be either a file path, or the file content itself
 type Certificate struct {
 	CertFile string
 	KeyFile  string
@@ -206,8 +259,7 @@ type Certificate struct {
 
 // Retry contains request retry config
 type Retry struct {
-	Attempts int   `description:"Number of attempts"`
-	MaxMem   int64 `description:"Maximum request body to be stored in memory in Mo"`
+	Attempts int `description:"Number of attempts"`
 }
 
 // NewTraefikDefaultPointersConfiguration creates a TraefikConfiguration with pointers default values
@@ -215,8 +267,8 @@ func NewTraefikDefaultPointersConfiguration() *TraefikConfiguration {
 	//default Docker
 	var defaultDocker provider.Docker
 	defaultDocker.Watch = true
+	defaultDocker.ExposedByDefault = true
 	defaultDocker.Endpoint = "unix:///var/run/docker.sock"
-	defaultDocker.TLS = &provider.DockerTLS{}
 
 	// default File
 	var defaultFile provider.File
@@ -238,8 +290,7 @@ func NewTraefikDefaultPointersConfiguration() *TraefikConfiguration {
 	var defaultConsul provider.Consul
 	defaultConsul.Watch = true
 	defaultConsul.Endpoint = "127.0.0.1:8500"
-	defaultConsul.Prefix = "/traefik"
-	defaultConsul.TLS = &provider.KvTLS{}
+	defaultConsul.Prefix = "traefik"
 	defaultConsul.Constraints = []types.Constraint{}
 
 	// default ConsulCatalog
@@ -250,9 +301,8 @@ func NewTraefikDefaultPointersConfiguration() *TraefikConfiguration {
 	// default Etcd
 	var defaultEtcd provider.Etcd
 	defaultEtcd.Watch = true
-	defaultEtcd.Endpoint = "127.0.0.1:400"
+	defaultEtcd.Endpoint = "127.0.0.1:2379"
 	defaultEtcd.Prefix = "/traefik"
-	defaultEtcd.TLS = &provider.KvTLS{}
 	defaultEtcd.Constraints = []types.Constraint{}
 
 	//default Zookeeper
@@ -272,8 +322,16 @@ func NewTraefikDefaultPointersConfiguration() *TraefikConfiguration {
 	//default Kubernetes
 	var defaultKubernetes provider.Kubernetes
 	defaultKubernetes.Watch = true
-	defaultKubernetes.Endpoint = "127.0.0.1:8080"
+	defaultKubernetes.Endpoint = ""
+	defaultKubernetes.LabelSelector = ""
 	defaultKubernetes.Constraints = []types.Constraint{}
+
+	// default Mesos
+	var defaultMesos provider.Mesos
+	defaultMesos.Watch = true
+	defaultMesos.Endpoint = "http://127.0.0.1:5050"
+	defaultMesos.ExposedByDefault = true
+	defaultMesos.Constraints = []types.Constraint{}
 
 	defaultConfiguration := GlobalConfiguration{
 		Docker:        &defaultDocker,
@@ -286,7 +344,8 @@ func NewTraefikDefaultPointersConfiguration() *TraefikConfiguration {
 		Zookeeper:     &defaultZookeeper,
 		Boltdb:        &defaultBoltDb,
 		Kubernetes:    &defaultKubernetes,
-		Retry:         &Retry{MaxMem: 2},
+		Mesos:         &defaultMesos,
+		Retry:         &Retry{},
 	}
 	return &TraefikConfiguration{
 		GlobalConfiguration: defaultConfiguration,

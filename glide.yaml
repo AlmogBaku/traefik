@@ -8,8 +8,11 @@ import:
 - package: github.com/cenkalti/backoff
 - package: github.com/codegangsta/negroni
 - package: github.com/containous/flaeg
-  version: b98687da5c323650f4513fda6b6203fcbdec9313
-- package: github.com/containous/oxy
+  version: f90a5e0dd64a1186a25434af077ac83acf710daf
+- package: github.com/vulcand/oxy
+  version: ab7796d7036b425fbc945853cd1b7e7adf43b0d6
+  repo: https://github.com/containous/oxy.git
+  vcs: git
   subpackages:
   - cbreaker
   - connlimit
@@ -18,9 +21,9 @@ import:
   - stream
   - utils
 - package: github.com/containous/staert
-  version: e2aa88e235a02dd52aa1d5d9de75f9d9139d1602
+  version: 21164fe201578bea96317a87752953ea5d9dc6d1
 - package: github.com/docker/engine-api
-  version: 3d3d0b6c9d2651aac27f416a6da0224c1875b3eb
+  version: 62043eb79d581a32ea849645277023c550732e52
   subpackages:
   - client
   - types
@@ -39,7 +42,7 @@ import:
   - store/zookeeper
 - package: github.com/elazarl/go-bindata-assetfs
 - package: github.com/gambol99/go-marathon
-  version: ade11d1dc2884ee1f387078fc28509559b6235d1
+  version: a558128c87724cd7430060ef5aedf39f83937f55
 - package: github.com/containous/mux
 - package: github.com/hashicorp/consul
   subpackages:
@@ -53,27 +56,45 @@ import:
 - package: github.com/thoas/stats
 - package: github.com/unrolled/render
 - package: github.com/vdemeester/docker-events
+  version: be74d4929ec1ad118df54349fda4b0cba60f849b
 - package: github.com/vulcand/vulcand
   subpackages:
   - plugin/rewrite
 - package: github.com/xenolf/lego
+  version: b2fad6198110326662e9e356a97199078a4a775c
   subpackages:
   - acme
 - package: golang.org/x/net
   subpackages:
   - context
 - package: gopkg.in/fsnotify.v1
-- package: github.com/libkermit/docker-check
-  version: bb75a86b169c6c5d22c0ee98278124036f272d7b
+- package: github.com/libkermit/compose
+  version: cadc5a3b83a15790174bd7fbc75ea2529785e772
 - package: github.com/libkermit/docker
-  version: 3b5eb2973efff7af33cfb65141deaf4ed25c6d02
+  version: 55e3595409924fcfbb850811e5a7cdbe8960a0b7
 - package: github.com/docker/docker
-  version: 9837ec4da53f15f9120d53a6e1517491ba8b0261
+  version: 534753663161334baba06f13b8efa4cad22b5bc5
   subpackages:
   - namesgenerator
 - package: github.com/go-check/check
 - package: github.com/docker/libcompose
-  version: 8ee7bcc364f7b8194581a3c6bd9fa019467c7873
+  version: d1876c1d68527a49c0aac22a0b161acc7296b740
 - package: github.com/mattn/go-shellwords
 - package: github.com/vdemeester/shakers
 - package: github.com/ryanuber/go-glob
+- package: github.com/mesos/mesos-go
+  subpackages:
+  - mesosproto
+  - mesos
+  - upid
+  - mesosutil
+  - detector
+- package: github.com/jarcoal/httpmock
+- package: github.com/mesosphere/mesos-dns
+  version: b47dc4c19f215e98da687b15b4c64e70f629bea5
+  repo: https://github.com/containous/mesos-dns.git
+  vcs: git
+- package: github.com/tv42/zbase32
+- package: github.com/abbot/go-http-auth
+- package: github.com/miekg/dns
+  version: 5d001d020961ae1c184f9f8152fdc73810481677
